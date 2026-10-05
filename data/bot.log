@@ -1,0 +1,11 @@
+2026-09-27 13:32:03,987 INFO root: Бот @Heliyssave_robot запущен
+2026-09-27 13:32:04,075 INFO aiogram.dispatcher: Start polling
+2026-09-27 13:32:04,156 INFO aiogram.dispatcher: Run polling for bot @Heliyssave_robot id=8762734503 - 'HeliysSavemod'
+2026-09-27 13:32:35,941 INFO aiogram.event: Update id=984262699 is handled. Duration 781 ms by bot id=8762734503
+2026-09-27 13:32:37,571 INFO aiogram.event: Update id=984262700 is handled. Duration 234 ms by bot id=8762734503
+2026-09-27 13:32:39,709 INFO aiogram.event: Update id=984262701 is handled. Duration 780 ms by bot id=8762734503
+2026-09-27 13:32:46,537 INFO aiogram.event: Update id=984262702 is handled. Duration 218 ms by bot id=8762734503
+2026-09-27 13:32:49,915 INFO aiogram.event: Update id=984262703 is handled. Duration 171 ms by bot id=8762734503
+2026-09-27 13:38:37,089 INFO aiogram.event: Update id=984262704 is handled. Duration 155 ms by bot id=8762734503
+2026-09-27 13:38:57,806 ERROR aiogram.dispatcher: Failed to fetch updates - TelegramNetworkError: HTTP Client says - ClientOSError: [WinError 1236] Подключение к сети было разорвано локальной системой
+2026-09-27 13:38:57,806 WARNING aiogram.dispatcher: Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8762734503)

@@ -1,0 +1,14 @@
+meta:
+  environment: python
+  toolchain:
+    name: pip
+    version: 3.11
+
+build:
+  requirementsPath: requirements.txt
+
+run:
+  scriptName: main.py
+  # постоянное хранилище: база сама сохраняется в /data/savemod.db (см. config.py)
+  persistenceMount: /data
+  containerPort: 80
