@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from aiogram import Bot, Router
@@ -5,7 +6,6 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import BusinessConnection, BusinessMessagesDeleted, Message
 
 import db
-from config import MAIN_ADMIN_ID
 from keyboards import kb
 from texts import RIGHTS_WARN, WELCOME, esc, user_link
 
@@ -109,12 +109,6 @@ async def on_connection(bc: BusinessConnection, bot: Bot):
     if db.is_banned(owner):
         await notify(bot, bc.user_chat_id, "🚫 Вы заблокированы в этом боте, функции недоступны.")
         return
-    conn = db.get_connection(bc.id)
-    who = f"{user_link(owner, bc.user.full_name)}" + (f" @{esc(bc.user.username)}" if bc.user.username else "")
-    if owner != MAIN_ADMIN_ID:
-        rights = f"ответ: {'✅' if conn['can_reply'] else '❌'}, удаление: {'✅' if conn['can_delete'] else '❌'}"
-        status = "🟢 подключил" if bc.is_enabled else "🔴 отключил"
-        await notify(bot, MAIN_ADMIN_ID, f"💼 {who} (<code>{owner}</code>) {status} бота\nПрава: {rights}")
     if not bc.is_enabled:
         db.log_event("disconnect", owner)
         await notify(bot, bc.user_chat_id, "🔌 Бот отключён от вашего аккаунта. Подключить снова: /start → «Как подключить».")
@@ -122,7 +116,7 @@ async def on_connection(bc: BusinessConnection, bot: Bot):
     db.log_event("connect", owner)
     db.get_settings(owner)
     text = WELCOME
-    missing = missing_rights(conn)
+    missing = missing_rights(db.get_connection(bc.id))
     if missing:
         text += RIGHTS_WARN.format(missing=missing)
     await notify(bot, bc.user_chat_id, text)
@@ -141,10 +135,6 @@ async def owner_command(m: Message, bot: Bot, conn: dict) -> bool:
 
     if cmd in (".mute", ".мут"):
         if chat_id == owner:
-            return True
-        if chat_id == MAIN_ADMIN_ID:
-            await notify(bot, owner, "🛡 Разработчика бота замьютить нельзя.")
-            await delete_msgs(bot, conn, chat_id, [m.message_id])
             return True
         db.mute(owner, chat_id, "manual")
         db.log_event("mute", owner)
@@ -171,11 +161,50 @@ async def owner_command(m: Message, bot: Bot, conn: dict) -> bool:
     elif cmd in (".free", ".свободен"):
         db.set_setting(owner, "ar_mode", "off")
         await notify(bot, owner, "✅ Автоответ выключен.")
+    elif cmd in (".mogged", ".моггед"):
+        if chat_id == owner:
+            return True
+        if not conn["can_reply"]:
+            await notify(bot, owner, "⚠️ Для <code>.mogged</code> нужно право «Ответ на сообщения».")
+        else:
+            db.log_event("mogged", owner)
+            asyncio.create_task(mogged(bot, conn, chat_id, m.chat.full_name))
     else:
         return False
 
     await delete_msgs(bot, conn, chat_id, [m.message_id])
     return True
+
+
+def _bar(p: int) -> str:
+    filled = p // 10
+    return f"<code>[{'█' * filled}{'░' * (10 - filled)}] {p}%</code>"
+
+
+async def mogged(bot: Bot, conn: dict, chat_id: int, full_name: str | None):
+    """Чисто визуальная анимация «сноса» аккаунта собеседника: одно сообщение, которое редактируется по кадрам."""
+    name = f"<b>{esc(full_name or 'Пользователь')}</b>"
+    frames = [
+        f"☠️ Цель: {name}\n⚙️ Подключаюсь к серверам Telegram...\n{_bar(0)}",
+        f"☠️ Цель: {name}\n📡 Запрос на снос аккаунта отправлен...\n{_bar(15)}",
+        f"☠️ Цель: {name}\n🗂 Стираю сообщения и медиа...\n{_bar(35)}",
+        f"☠️ Цель: {name}\n🖼 Удаляю аватарку и юзернейм...\n{_bar(55)}",
+        f"☠️ Цель: {name}\n👥 Отвязываю номер и контакты...\n{_bar(75)}",
+        f"☠️ Цель: {name}\n🔥 Финальное удаление...\n{_bar(95)}",
+        f"☠️ Цель: {name}\n✅ Готово\n{_bar(100)}",
+        "👻 <b>Удалённый аккаунт</b>\n<i>был(а) очень давно</i>\n"
+        "━━━━━━━━━━━━━━\n"
+        f"Аккаунт {name} больше не существует.\n"
+        "💀 <b>MOGGED</b> 💀",
+    ]
+    try:
+        msg = await bot.send_message(chat_id, frames[0], business_connection_id=conn["id"])
+        for frame in frames[1:]:
+            await asyncio.sleep(1.2)
+            await bot.edit_message_text(frame, business_connection_id=conn["id"],
+                                        chat_id=chat_id, message_id=msg.message_id)
+    except TelegramAPIError as e:
+        log.warning("mogged failed: %s", e)
 
 
 # ---------- входящие / исходящие сообщения ----------
@@ -200,15 +229,14 @@ async def on_business_message(m: Message, bot: Bot):
         return
 
     # сообщение от собеседника
-    is_dev = chat_id == MAIN_ADMIN_ID  # разработчика не мьютим и не проверяем антискамом
-    if not is_dev and db.is_muted(owner, chat_id):
+    if db.is_muted(owner, chat_id):
         if await delete_msgs(bot, conn, chat_id, [m.message_id]):
             db.log_event("muted_deleted", owner)
         return
 
     s = db.get_settings(owner)
     text = m.text or m.caption or ""
-    if s["antiscam"] and text and not is_dev:
+    if s["antiscam"] and text:
         word = db.find_scam(text)
         if word:
             await antiscam(m, bot, conn, word, text)

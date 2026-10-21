@@ -1,19 +1,12 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-import db
 from texts import on_off
 
 
 def kb(rows) -> InlineKeyboardMarkup:
-    """Строки из пар (текст, callback_data) или готовых InlineKeyboardButton."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [b if isinstance(b, InlineKeyboardButton) else InlineKeyboardButton(text=b[0], callback_data=b[1])
-         for b in row] for row in rows
+        [InlineKeyboardButton(text=t, callback_data=d) for t, d in row] for row in rows
     ])
-
-
-def link_rows():
-    return [[InlineKeyboardButton(text=b["text"], url=b["url"])] for b in db.list_buttons()]
 
 
 BACK = [("⬅️ Назад", "m:main")]
@@ -25,7 +18,6 @@ def main_menu(is_admin=False):
         [("🤖 Автоответ", "m:ar"), ("🛡 Антискам", "m:scam")],
         [("🔔 Уведомления", "m:notify"), ("🔇 Замьюченные", "m:mutes")],
         [("📊 Моя статистика", "m:stats"), ("📖 Как подключить", "m:help")],
-        *link_rows(),
     ]
     if is_admin:
         rows.append([("👑 Админ-панель", "adm:main")])
@@ -70,13 +62,11 @@ def mutes_menu(mutes):
 def admin_menu():
     return kb([
         [("📊 Статистика", "adm:stats"), ("🏆 Топ запусков", "adm:top")],
-        [("💼 Кто подключил бота", "adm:conns")],
         [("👥 Новые юзеры", "adm:recent"), ("🔍 Инфо по ID", "adm:info")],
         [("🚫 Бан", "adm:ban"), ("✅ Разбан", "adm:unban")],
         [("📋 Список банов", "adm:banlist"), ("📢 Рассылка", "adm:bc")],
         [("🛡 Антискам-слова", "adm:words"), ("📁 Экспорт CSV", "adm:export")],
         [("🧹 Очистить кэш", "adm:cleanup"), ("👮 Админы", "adm:admins")],
-        [("🔗 Кнопки-ссылки", "adm:btns")],
     ])
 
 

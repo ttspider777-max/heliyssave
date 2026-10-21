@@ -9,6 +9,6 @@ build:
 
 run:
   scriptName: main.py
-  # постоянное хранилище: база сама сохраняется в /data/savemod.db (см. config.py)
+  # база в постоянном хранилище: задайте переменную окружения DB_PATH=/data/savemod.db
   persistenceMount: /data
   containerPort: 80

@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.filters import BaseFilter, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 import db
 import keyboards as K
@@ -36,10 +36,6 @@ class A(StatesGroup):
     del_word = State()
     add_admin = State()
     del_admin = State()
-    btn_text = State()
-    btn_url = State()
-    btn_edit_text = State()
-    btn_edit_url = State()
 
 
 PROMPTS = {
@@ -126,26 +122,6 @@ async def cb_recent(c: CallbackQuery):
     rows = db.recent_users(25)
     lines = [f"• {user_line(r)}\n   с {fmt_ts(r['first_seen'])}, запусков: {r['starts']}" for r in rows]
     await show(c, "👥 <b>Последние пользователи</b>\n\n" + ("\n".join(lines) or "Пусто"), K.kb([K.ADMIN_BACK]))
-
-
-@router.callback_query(F.data.in_({"adm:conns", "adm:conns:active"}))
-async def cb_conns(c: CallbackQuery):
-    active_only = c.data.endswith(":active")
-    rows = db.all_connections(active_only)
-    lines = []
-    for r in rows:
-        uname = f" @{r['username']}" if r["username"] else ""
-        rights = ("💬" if r["can_reply"] else "🚫💬") + " " + ("🗑" if r["can_delete"] else "🚫🗑")
-        lines.append(f"{'🟢' if r['enabled'] else '🔴'} {user_link(r['owner_id'], r['first_name'])}{esc(uname)} "
-                     f"<code>{r['owner_id']}</code>\n   {fmt_ts(r['date'])} | права: {rights}")
-    s = db.stats()
-    text = (f"💼 <b>Кто подключил бота</b>\n"
-            f"Активных: {s['conn_active']} | Всего: {s['conn_total']}\n\n"
-            + ("\n".join(lines) or "Пока никто")
-            + "\n\n<i>🟢 подключён, 🔴 отключил. 💬 может отвечать, 🗑 может удалять. "
-              "Время: последнее изменение подключения.</i>")
-    toggle = ("Показать всех", "adm:conns") if active_only else ("Только активные", "adm:conns:active")
-    await show(c, text[:4096], K.kb([[toggle, ("🔄 Обновить", c.data)], K.ADMIN_BACK]))
 
 
 # ---------- инфо ----------
@@ -391,149 +367,3 @@ async def got_del_admin(m: Message, state: FSMContext):
         return
     db.del_admin(uid)
     await m.answer(f"✅ <code>{uid}</code> больше не админ.", reply_markup=K.kb([K.ADMIN_BACK]))
-
-
-# ---------- кнопки-ссылки в главном меню ----------
-
-URL_HELP = ("Подходит: <code>https://...</code>, <code>t.me/канал</code>, <code>@username</code> "
-            "или <code>tg://...</code>")
-
-
-def btns_view():
-    buttons = db.list_buttons()
-    lines = [f"{i}. {esc(b['text'])} → {esc(b['url'])}" for i, b in enumerate(buttons, 1)]
-    text = ("🔗 <b>Кнопки-ссылки</b>\n"
-            "Показываются в главном меню у всех пользователей.\n\n"
-            + ("\n".join(lines) or "Пока нет ни одной кнопки.")
-            + "\n\nНажмите на кнопку, чтобы изменить ссылку, текст, порядок или удалить её.")
-    rows = [[(f"✏️ {b['text']}"[:60], f"adm:btn:{b['id']}")] for b in buttons]
-    rows.append([("➕ Добавить кнопку", "adm:btn_add")])
-    rows.append(K.ADMIN_BACK)
-    return text, K.kb(rows)
-
-
-def btn_view(b):
-    text = (f"🔗 <b>Кнопка</b>\n\n"
-            f"Текст: {esc(b['text'])}\n"
-            f"Ссылка: {esc(b['url'])}")
-    bid = b["id"]
-    return text, K.kb([
-        [InlineKeyboardButton(text="👁 Открыть ссылку", url=b["url"])],
-        [("🔗 Изменить ссылку", f"adm:btn_url:{bid}"), ("✏️ Изменить текст", f"adm:btn_text:{bid}")],
-        [("⬆️ Выше", f"adm:btn_up:{bid}"), ("⬇️ Ниже", f"adm:btn_down:{bid}")],
-        [("🗑 Удалить", f"adm:btn_del:{bid}")],
-        [("⬅️ К кнопкам", "adm:btns")],
-    ])
-
-
-async def check_url(m: Message, text: str, url: str) -> bool:
-    """Telegram сам проверяет ссылку: пробуем показать превью кнопки."""
-    try:
-        await m.answer("👁 Превью кнопки:", reply_markup=K.kb([[InlineKeyboardButton(text=text, url=url)]]))
-        return True
-    except TelegramAPIError:
-        await m.answer("❌ Telegram не принял эту ссылку. Пришлите другую.\n" + URL_HELP, reply_markup=K.CANCEL)
-        return False
-
-
-@router.callback_query(F.data == "adm:btns")
-async def cb_btns(c: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await show(c, *btns_view())
-
-
-@router.callback_query(F.data.regexp(r"^adm:btn:\d+$"))
-async def cb_btn(c: CallbackQuery):
-    b = db.get_button(int(c.data.split(":")[2]))
-    if not b:
-        await c.answer("Кнопка уже удалена", show_alert=True)
-        await show(c, *btns_view())
-        return
-    await show(c, *btn_view(b))
-
-
-@router.callback_query(F.data.regexp(r"^adm:btn_(up|down):\d+$"))
-async def cb_btn_move(c: CallbackQuery):
-    _, action, bid = c.data.split(":")
-    db.move_button(int(bid), -1 if action == "btn_up" else 1)
-    await show(c, *btns_view())
-
-
-@router.callback_query(F.data.regexp(r"^adm:btn_del:\d+$"))
-async def cb_btn_del(c: CallbackQuery):
-    db.delete_button(int(c.data.split(":")[2]))
-    await c.answer("🗑 Кнопка удалена")
-    await show(c, *btns_view())
-
-
-@router.callback_query(F.data == "adm:btn_add")
-async def cb_btn_add(c: CallbackQuery, state: FSMContext):
-    await state.set_state(A.btn_text)
-    await c.message.answer("➕ Пришлите <b>текст</b> новой кнопки (например: <code>📢 Наш канал</code>).",
-                           reply_markup=K.CANCEL)
-    await c.answer()
-
-
-@router.message(A.btn_text, F.text)
-async def got_btn_text(m: Message, state: FSMContext):
-    await state.update_data(btn_text=m.text.strip()[:64])
-    await state.set_state(A.btn_url)
-    await m.answer("🔗 Теперь пришлите <b>ссылку</b>, куда будет вести кнопка.\n" + URL_HELP, reply_markup=K.CANCEL)
-
-
-@router.message(A.btn_url, F.text)
-async def got_btn_url(m: Message, state: FSMContext):
-    url = db.normalize_url(m.text)
-    if not url:
-        await m.answer("❌ Это не похоже на ссылку.\n" + URL_HELP, reply_markup=K.CANCEL)
-        return
-    text = (await state.get_data())["btn_text"]
-    if not await check_url(m, text, url):
-        return
-    await state.clear()
-    db.add_button(text, url)
-    await m.answer("✅ Кнопка добавлена в главное меню.", reply_markup=K.kb([[("🔗 К кнопкам", "adm:btns")]]))
-
-
-@router.callback_query(F.data.regexp(r"^adm:btn_(url|text):\d+$"))
-async def cb_btn_edit(c: CallbackQuery, state: FSMContext):
-    _, action, bid = c.data.split(":")
-    await state.update_data(btn_id=int(bid))
-    if action == "btn_url":
-        await state.set_state(A.btn_edit_url)
-        await c.message.answer("🔗 Пришлите новую ссылку для кнопки.\n" + URL_HELP, reply_markup=K.CANCEL)
-    else:
-        await state.set_state(A.btn_edit_text)
-        await c.message.answer("✏️ Пришлите новый текст кнопки.", reply_markup=K.CANCEL)
-    await c.answer()
-
-
-@router.message(A.btn_edit_url, F.text)
-async def got_btn_edit_url(m: Message, state: FSMContext):
-    b = db.get_button((await state.get_data())["btn_id"])
-    if not b:
-        await state.clear()
-        await m.answer("Кнопка уже удалена.", reply_markup=K.kb([[("🔗 К кнопкам", "adm:btns")]]))
-        return
-    url = db.normalize_url(m.text)
-    if not url:
-        await m.answer("❌ Это не похоже на ссылку.\n" + URL_HELP, reply_markup=K.CANCEL)
-        return
-    if not await check_url(m, b["text"], url):
-        return
-    await state.clear()
-    db.update_button(b["id"], "url", url)
-    text, markup = btn_view(db.get_button(b["id"]))
-    await m.answer("✅ Ссылка изменена.\n\n" + text, reply_markup=markup)
-
-
-@router.message(A.btn_edit_text, F.text)
-async def got_btn_edit_text(m: Message, state: FSMContext):
-    b = db.get_button((await state.get_data())["btn_id"])
-    await state.clear()
-    if not b:
-        await m.answer("Кнопка уже удалена.", reply_markup=K.kb([[("🔗 К кнопкам", "adm:btns")]]))
-        return
-    db.update_button(b["id"], "text", m.text.strip()[:64])
-    text, markup = btn_view(db.get_button(b["id"]))
-    await m.answer("✅ Текст изменён.\n\n" + text, reply_markup=markup)

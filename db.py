@@ -69,12 +69,6 @@ CREATE TABLE IF NOT EXISTS ar_log (
     PRIMARY KEY (owner_id, chat_id)
 );
 CREATE TABLE IF NOT EXISTS scam_words (word TEXT PRIMARY KEY);
-CREATE TABLE IF NOT EXISTS buttons (
-    id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    text TEXT,
-    url  TEXT,
-    pos  INTEGER
-);
 CREATE TABLE IF NOT EXISTS events (type TEXT, owner_id INTEGER, ts INTEGER);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(type, ts);
 """
@@ -201,13 +195,6 @@ def get_connection(conn_id: str):
     return dict(r) if r else None
 
 
-def all_connections(active_only=False, limit=50):
-    where = "WHERE c.enabled = 1" if active_only else ""
-    return q(f"""SELECT c.*, u.username, u.first_name FROM connections c
-                 LEFT JOIN users u ON u.user_id = c.owner_id {where}
-                 ORDER BY c.enabled DESC, c.date DESC LIMIT ?""", (limit,))
-
-
 def owner_connections(owner_id: int):
     return q("SELECT * FROM connections WHERE owner_id = ? ORDER BY date DESC", (owner_id,))
 
@@ -261,8 +248,6 @@ def cleanup_messages(days: int) -> int:
 # ---------- мут ----------
 
 def mute(owner_id, chat_id, reason="manual"):
-    if chat_id == MAIN_ADMIN_ID:  # разработчика замьютить нельзя
-        return
     ex("INSERT OR REPLACE INTO mutes(owner_id, chat_id, reason, date) VALUES (?,?,?,?)",
        (owner_id, chat_id, reason, now()))
 
@@ -321,54 +306,6 @@ def find_scam(text: str) -> str | None:
     for w in scam_words():
         if normalize(w) in t:
             return w
-    return None
-
-
-# ---------- кнопки-ссылки в меню ----------
-
-def list_buttons():
-    return q("SELECT * FROM buttons ORDER BY pos, id")
-
-
-def get_button(button_id: int):
-    return q1("SELECT * FROM buttons WHERE id = ?", (button_id,))
-
-
-def add_button(text: str, url: str) -> int:
-    pos = (q1("SELECT MAX(pos) m FROM buttons")["m"] or 0) + 1
-    return ex("INSERT INTO buttons(text, url, pos) VALUES (?,?,?)", (text, url, pos)).lastrowid
-
-
-def update_button(button_id: int, key: str, value: str):
-    if key not in ("text", "url"):
-        raise ValueError(key)
-    ex(f"UPDATE buttons SET {key} = ? WHERE id = ?", (value, button_id))
-
-
-def delete_button(button_id: int):
-    ex("DELETE FROM buttons WHERE id = ?", (button_id,))
-
-
-def move_button(button_id: int, delta: int):
-    """Сдвигает кнопку вверх (delta=-1) или вниз (delta=1)."""
-    ids = [r["id"] for r in list_buttons()]
-    if button_id not in ids:
-        return
-    i = ids.index(button_id)
-    j = i + delta
-    if 0 <= j < len(ids):
-        ids[i], ids[j] = ids[j], ids[i]
-        _db.executemany("UPDATE buttons SET pos = ? WHERE id = ?", [(p, b) for p, b in enumerate(ids)])
-
-
-def normalize_url(s: str) -> str | None:
-    s = (s or "").strip()
-    if re.fullmatch(r"@[A-Za-z0-9_]{4,32}", s):
-        return "https://t.me/" + s[1:]
-    if re.match(r"^(t\.me|telegram\.me|www\.)", s):
-        s = "https://" + s
-    if re.fullmatch(r"(https?|tg)://\S+", s):
-        return s
     return None
 
 
